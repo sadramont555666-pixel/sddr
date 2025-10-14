@@ -315,18 +315,24 @@ process.on('uncaughtException', (error) => {
   console.error('UncaughtException:', error);
 });
 
-const server = await createHonoServer({
-  app,
-  defaultLogger: false,
+// Wrap top-level await usage in an async IIFE to avoid top-level await build issues
+let server: any;
+(async () => {
+  server = await createHonoServer({
+    app,
+    defaultLogger: false,
+  });
+
+  // Attach WebSocket hub to underlying Node server
+  try { wsHub.attach(server as any); } catch (err) { console.warn('WS attach failed', err); }
+
+  // Start in-process cron schedules (node process only)
+  try {
+    scheduleDaily('23:00', dailyReminder);
+    scheduleDaily('02:00', autoSuspension);
+  } catch (err) { console.warn('Cron schedule init failed', err); }
+})().catch((err) => {
+  console.error('[server bootstrap] failed:', err);
 });
-
-// Attach WebSocket hub to underlying Node server
-try { wsHub.attach(server as any); } catch (err) { console.warn('WS attach failed', err); }
-
-// Start in-process cron schedules (node process only)
-try {
-  scheduleDaily('23:00', dailyReminder);
-  scheduleDaily('02:00', autoSuspension);
-} catch (err) { console.warn('Cron schedule init failed', err); }
 
 export default server;
