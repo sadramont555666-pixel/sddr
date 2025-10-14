@@ -42,6 +42,8 @@
 **Output Directory:** `build/client`  
 **Install Command:** `npm install`
 
+> **توجه:** فایل `vercel.json` به‌طور خودکار از `@vercel/node@3.0.0` استفاده می‌کند که با نسخه‌های جدید Vercel سازگار است
+
 ### گام 3: Environment Variables
 ```env
 DATABASE_URL=postgresql://...
