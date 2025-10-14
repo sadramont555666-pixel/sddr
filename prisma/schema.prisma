@@ -1,0 +1,332 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+}
+
+enum ReportStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PanelType {
+  TOP_STUDENTS
+  FAMILY_CHAT
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id                String    @id @default(cuid())
+  name              String?
+  phone             String    @unique
+  password          String
+  role              Role      @default(STUDENT)
+  grade             String?
+  field             String?
+  city              String?
+  profileImageUrl   String?
+  accessSuspendedAt DateTime?
+  phoneVerifiedAt   DateTime?
+  isVerified        Boolean   @default(false)
+  status            UserStatus @default(ACTIVE)
+  lastLogin         DateTime?
+  createdAt         DateTime  @default(now())
+  
+  // Admin-specific fields
+  bio               String?   // بیوگرافی/کامنت مدیر
+  officeAddress     String?   // آدرس دفتر مشاور
+  landlinePhone     String?   // شماره تماس ثابت
+  pinned            Boolean   @default(false) // نمایش در لیست اعضای ویژه
+
+  // OTP security fields
+  otpSentAt         DateTime? // Tracks the timestamp of the last sent OTP
+  otpAttempts       Int       @default(0) // Counts consecutive resend attempts
+  otpBlockedUntil   DateTime? // If set, the user is blocked until this time
+
+  reports                 Report[]
+  feedbacks               Feedback[]
+  challengeParticipations ChallengeParticipation[]
+  sentMessages            Message[]
+  uploadedVideos          Video[]
+  videoLikes              VideoLike[]
+  videoViews              VideoView[] // رابطه با مدل ردیابی بازدید
+  otp                     Otp?
+  notifications           Notification[]
+  chatMessagesSent        ChatMessage[] @relation("ChatMessagesSent")
+  chatMessagesReceived    ChatMessage[] @relation("ChatMessagesReceived")
+  adminContents           AdminContent[] @relation("AdminContentAuthor")
+  contentLikes            ContentLike[]
+}
+
+model Otp {
+  id        String   @id @default(cuid())
+  code      String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OtpCode {
+  id         String   @id @default(cuid())
+  phone      String
+  code       String
+  purpose    String   @default("signup")
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  isUsed     Boolean  @default(false)
+  attempts   Int      @default(0)
+}
+
+model Report {
+  id                   String       @id @default(cuid())
+  date                 DateTime
+  subject              String
+  testSource           String
+  testCount            Int
+  studyDurationMinutes Int
+  description          String?
+  fileUrl              String?
+  status               ReportStatus @default(PENDING)
+  createdAt            DateTime     @default(now())
+
+  student   User   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId String
+  feedback  Feedback?
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now())
+
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  reportId String @unique
+
+  admin   User   @relation(fields: [adminId], references: [id])
+  adminId String
+}
+
+model Challenge {
+  id          String    @id @default(cuid())
+  title       String
+  description String
+  isActive    Boolean   @default(true)
+  startDate   DateTime
+  endDate     DateTime
+
+  participations ChallengeParticipation[]
+}
+
+model ChallengeParticipation {
+  id          String   @id @default(cuid())
+  date        DateTime @default(now())
+  progress    Int      @default(0) // درصد پیشرفت کلی (0-100)
+  
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId   String
+  challenge   Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  challengeId String
+  
+  dailyProgress DailyProgress[] // ارتباط با پیشرفت روزانه
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@unique([studentId, challengeId])
+}
+
+model DailyProgress {
+  id                 String   @id @default(cuid())
+  date               DateTime @db.Date // فقط تاریخ روز
+  status             String   @default("COMPLETED") // وضعیت: COMPLETED, SKIPPED, etc.
+  satisfactionRating Int      // امتیاز رضایت از 1 تا 5
+  notes              String?  // یادداشت اختیاری دانش‌آموز
+
+  participation   ChallengeParticipation @relation(fields: [participationId], references: [id], onDelete: Cascade)
+  participationId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([participationId, date]) // هر روز فقط یک بار قابل ثبت
+  @@index([date])
+}
+
+model Video {
+  id                 String      @id @default(cuid())
+  title              String      // عنوان اصلی که ادمین وارد می‌کند
+  category           String
+  videoUrl           String      // لینک یوتیوب
+  thumbnailUrl       String?     // عکس پیش‌نمایش استخراج شده
+  videoTitle         String?     // عنوان استخراج شده از لینک
+  videoDescription   String?     // توضیحات استخراج شده از لینک
+  views              Int         @default(0) // تعداد بازدید
+  createdAt          DateTime    @default(now())
+
+  // فیلدهای پیش‌نمایش غنی برای داشبورد دانش‌آموز
+  previewTitle       String?     // عنوان پیش‌نمایش
+  previewDescription String?     // توضیحات پیش‌نمایش
+  previewImage       String?     // تصویر پیش‌نمایش
+
+  uploadedBy   User        @relation(fields: [uploadedById], references: [id])
+  uploadedById String
+  likes        VideoLike[]
+  viewedBy     VideoView[] // رابطه با مدل ردیابی بازدید یکتا
+}
+
+model VideoLike {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  videoId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@unique([userId, videoId]) // Prevents duplicate likes
+}
+
+model VideoView {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  video   Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  videoId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@unique([userId, videoId]) // هر کاربر فقط یک بار بازدید ثبت می‌شود
+}
+
+model Message {
+  id         String    @id @default(cuid())
+  content    String
+  panelType  PanelType
+  isApproved Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+
+  sender   User   @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  senderId String
+}
+
+// New Chat Message System
+model ChatMessage {
+  id                String    @id @default(cuid())
+  content           String    @db.Text
+  type              String    @default("public") // "public" | "private"
+  
+  // Sender information
+  senderId          String
+  senderName        String?
+  senderRole        String?
+  senderAvatarUrl   String?
+  
+  // Private message recipient (admin)
+  privateToUserId   String?
+  
+  // Profanity detection
+  containsProfanity Boolean   @default(false)
+  
+  // Moderation
+  status            String    @default("visible") // "visible" | "hidden"
+  deletedBy         String?   // Admin who deleted/hid the message
+  deletedAt         DateTime?
+  
+  // Timestamps
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relations
+  sender            User      @relation("ChatMessagesSent", fields: [senderId], references: [id], onDelete: Cascade)
+  privateTo         User?     @relation("ChatMessagesReceived", fields: [privateToUserId], references: [id], onDelete: SetNull)
+  
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@index([senderId])
+  @@index([privateToUserId])
+}
+
+// Profanity words management
+model Profanity {
+  id        String   @id @default(cuid())
+  word      String   @unique
+  createdAt DateTime @default(now())
+  
+  @@index([word])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  recipient   User     @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  recipientId String
+  content     String
+  type        String   // 'FEEDBACK' | 'REMINDER' | 'SYSTEM'
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model AppSetting {
+  key   String @id
+  value String
+}
+
+// Admin Content (replaces Videos section)
+model AdminContent {
+  id          String    @id @default(cuid())
+  title       String
+  description String?   @db.Text
+  imageUrl    String    // URL به تصویر آپلود شده
+  linkUrl     String?   // لینک خارجی (اختیاری)
+  
+  authorId    String    // ID ادمینی که این را ساخته
+  author      User      @relation("AdminContentAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  
+  views       Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  likes       ContentLike[]
+  
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+// Likes for Admin Content
+model ContentLike {
+  id        String   @id @default(cuid())
+  
+  contentId String
+  content   AdminContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@unique([contentId, userId]) // هر کاربر فقط یک بار می‌تواند لایک کند
+  @@index([contentId])
+  @@index([userId])
+}
