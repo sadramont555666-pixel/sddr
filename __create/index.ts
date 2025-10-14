@@ -315,24 +315,30 @@ process.on('uncaughtException', (error) => {
   console.error('UncaughtException:', error);
 });
 
-// Wrap top-level await usage in an async IIFE to avoid top-level await build issues
-let server: any;
-(async () => {
-  server = await createHonoServer({
-    app,
-    defaultLogger: false,
-  });
-
-  // Attach WebSocket hub to underlying Node server
-  try { wsHub.attach(server as any); } catch (err) { console.warn('WS attach failed', err); }
-
-  // Start in-process cron schedules (node process only)
-  try {
-    scheduleDaily('23:00', dailyReminder);
-    scheduleDaily('02:00', autoSuspension);
-  } catch (err) { console.warn('Cron schedule init failed', err); }
-})().catch((err) => {
-  console.error('[server bootstrap] failed:', err);
+// Create server lazily without top-level await; export an object with fetch()
+const serverPromise = createHonoServer({
+  app,
+  defaultLogger: false,
 });
 
-export default server;
+serverPromise
+  .then((created) => {
+    try { wsHub.attach(created as any); } catch (err) { console.warn('WS attach failed', err); }
+    try {
+      scheduleDaily('23:00', dailyReminder);
+      scheduleDaily('02:00', autoSuspension);
+    } catch (err) { console.warn('Cron schedule init failed', err); }
+  })
+  .catch((err) => {
+    console.error('[server bootstrap] failed:', err);
+  });
+
+const lazyHonoApp = {
+  fetch: async (request: Request, env?: any, ctx?: any) => {
+    const created = await serverPromise;
+    // created is a Hono app instance; delegate fetch
+    return created.fetch(request as any, env as any, ctx as any);
+  },
+};
+
+export default lazyHonoApp as any;
